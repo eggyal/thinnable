@@ -1,6 +1,6 @@
 [package]
 name = "thinnable"
-version = "0.0.0"
+version = "0.1.0"
 authors = ["Alan Egerton <eggyal@gmail.com>"]
 edition = "2018"
 description = "Thin references to unsized types."
@@ -9,3 +9,5 @@ license = "Apache-2.0"
 keywords = ["reference", "thin", "fat", "sized", "unsized"]
 categories = ["data-structures", "memory-management", "no-std", "rust-patterns"]
 
+[features]
+std = []
