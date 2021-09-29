@@ -10,8 +10,16 @@ use core::{
 use crate::{Fake, Metadata};
 
 /// A "thin" exclusive DST reference, analogue of `&mut U`.
-#[repr(transparent)]
-pub struct ThinMut<'a, U: ?Sized, M = Metadata<U>>(pub(crate) &'a mut Fake<U, M>);
+pub struct ThinMut<'a, U: ?Sized, M = Metadata<U>>(&'a mut Fake<U, M>);
+
+impl<'a, U, M> ThinMut<'a, U, M>
+where
+    U: ?Sized,
+{
+    pub(crate) fn new(r: &'a mut Fake<U, M>) -> Self {
+        Self(r)
+    }
+}
 
 impl<U, M> BorrowMut<U> for ThinMut<'_, U, M>
 where

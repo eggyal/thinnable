@@ -10,8 +10,16 @@ use core::{
 use crate::{Fake, Metadata};
 
 /// A "thin" shared DST reference, analogue of `&U`.
-#[repr(transparent)]
-pub struct ThinRef<'a, U: ?Sized, M = Metadata<U>>(pub(crate) &'a Fake<U, M>);
+pub struct ThinRef<'a, U: ?Sized, M = Metadata<U>>(&'a Fake<U, M>);
+
+impl<'a, U, M> ThinRef<'a, U, M>
+where
+    U: ?Sized,
+{
+    pub(crate) fn new(r: &'a Fake<U, M>) -> Self {
+        Self(r)
+    }
+}
 
 impl<U, M> Clone for ThinRef<'_, U, M>
 where

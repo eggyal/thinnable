@@ -1,24 +1,44 @@
 use core::{
     convert::TryInto,
-    marker::PhantomData,
+    marker::Unsize,
     ops::{Deref, DerefMut},
-    ptr,
 };
 
-use crate::Metadata;
+use crate::metadata::{Metadata, MetadataCreationFailure, MetadataFor};
 
 #[repr(C)]
-pub(crate) struct Real<T, M>
+pub(crate) struct Real<T, U, M>
 where
     T: ?Sized,
+    U: ?Sized,
 {
-    pub metadata: M,
-    pub data: T,
+    metadata: MetadataFor<U, M>,
+    data: T,
 }
 
-impl<T, M> Deref for Real<T, M>
+impl<T, U, M> Real<T, U, M>
+where
+    U: ?Sized,
+{
+    #[inline(always)]
+    pub fn try_new(data: T) -> Result<Self, MetadataCreationFailure<U, M>>
+    where
+        T: Unsize<U>,
+        Metadata<U>: TryInto<M>,
+    {
+        MetadataFor::try_new(&data).map(|metadata| Self { metadata, data })
+    }
+
+    #[inline(always)]
+    pub fn into_inner(self) -> T {
+        self.data
+    }
+}
+
+impl<T, U, M> Deref for Real<T, U, M>
 where
     T: ?Sized,
+    U: ?Sized,
 {
     type Target = T;
     #[inline(always)]
@@ -27,9 +47,10 @@ where
     }
 }
 
-impl<T, M> DerefMut for Real<T, M>
+impl<T, U, M> DerefMut for Real<T, U, M>
 where
     T: ?Sized,
+    U: ?Sized,
 {
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut T {
@@ -37,79 +58,90 @@ where
     }
 }
 
-#[repr(transparent)]
-pub(crate) struct Fake<U: ?Sized, M>(Real<PhantomData<U>, M>);
+#[allow(unsafe_code)]
+mod fake {
+    use super::{Deref, DerefMut, Metadata, Real, TryInto};
+    use core::{marker::PhantomData, ptr};
 
-/// Obtain the metadata for the DST wrapper.
-///
-/// ### Panics
-/// This method will panic if `fake.0.metadata` contains a value
-/// that cannot be converted to a `Metadata<U>`.
-#[inline(always)]
-fn metadata<U, M>(fake: &Fake<U, M>) -> Metadata<Real<U, M>>
-where
-    U: ?Sized,
-    M: Copy + TryInto<Metadata<U>>,
-{
-    let metadata = fake
-        .0
-        .metadata
-        .try_into()
-        .ok()
-        .expect("not a valid metadata value");
+    #[repr(transparent)]
+    pub(crate) struct Fake<U: ?Sized, M>(Real<PhantomData<U>, U, M>);
 
-    // The metadata of `Real<U, _>` is that of its last field, `data`,
-    // which has type `U`.
-    //
-    // `Metadata<U>` and `Metadata<Real<U, _>>` are therefore the same,
-    // but we cannot inform the compiler of this without publicly exposing
-    // `Unsized`; likewise for adding constraints that would enable safe
-    // conversion (such as `Metadata<U>: Into<Metadata<Real<U, M>>>`).
-    //
-    // Instead, we simply dereference a casted raw pointer, which is
-    // perfectly safe because the types are necessarily identical.
-    unsafe { *ptr::addr_of!(metadata).cast() }
-}
-
-impl<U, M> Deref for Fake<U, M>
-where
-    U: ?Sized,
-    M: Copy + TryInto<Metadata<U>>,
-{
-    type Target = Real<U, M>;
+    /// Obtain the metadata for the DST wrapper.
+    ///
+    /// ### Panics
+    /// This method will panic if `fake.0.metadata` contains a value
+    /// that cannot be converted to a `Metadata<U>`.
     #[inline(always)]
-    fn deref(&self) -> &Real<U, M> {
-        let data_address = ptr::addr_of!(self.0).cast();
-        let metadata = metadata(self);
-        let ptr = ptr::from_raw_parts(data_address, metadata);
-        unsafe { &*ptr }
+    fn metadata<U, M>(fake: &Fake<U, M>) -> Metadata<Real<U, U, M>>
+    where
+        U: ?Sized,
+        M: Copy + TryInto<Metadata<U>>,
+    {
+        let metadata = fake
+            .0
+            .metadata
+            .try_get()
+            .ok()
+            .expect("recoverable metadata value");
+
+        // The metadata of `Real<U, _, _>` is that of its last field, `data`,
+        // which has type `U`.
+        //
+        // `Metadata<U>` and `Metadata<Real<U, _, _>>` are therefore the same,
+        // but we cannot inform the compiler of this without publicly exposing
+        // `Real`; likewise for adding constraints that would enable safe
+        // conversion (such as `Metadata<U>: Into<Metadata<Real<U, M>>>`).
+        //
+        // Instead, we simply dereference a casted raw pointer, which is
+        // perfectly safe because the types are necessarily identical.
+        let ptr = ptr::addr_of!(metadata).cast();
+        unsafe { *ptr }
+    }
+
+    impl<U, M> Deref for Fake<U, M>
+    where
+        U: ?Sized,
+        M: Copy + TryInto<Metadata<U>>,
+    {
+        type Target = Real<U, U, M>;
+        #[inline(always)]
+        fn deref(&self) -> &Real<U, U, M> {
+            let data_address = ptr::addr_of!(self.0).cast();
+            let metadata = metadata(self);
+            let ptr = ptr::from_raw_parts(data_address, metadata);
+            unsafe { &*ptr }
+        }
+    }
+
+    impl<U, M> DerefMut for Fake<U, M>
+    where
+        U: ?Sized,
+        M: Copy + TryInto<Metadata<U>>,
+    {
+        #[inline(always)]
+        fn deref_mut(&mut self) -> &mut Real<U, U, M> {
+            let data_address = ptr::addr_of_mut!(self.0).cast();
+            let metadata = metadata(self);
+            let ptr = ptr::from_raw_parts_mut(data_address, metadata);
+            unsafe { &mut *ptr }
+        }
+    }
+
+    impl<T, U: ?Sized, M> AsRef<Fake<U, M>> for Real<T, U, M> {
+        #[inline(always)]
+        fn as_ref(&self) -> &Fake<U, M> {
+            let ptr = (self as *const Self).cast();
+            unsafe { &*ptr }
+        }
+    }
+
+    impl<T, U: ?Sized, M> AsMut<Fake<U, M>> for Real<T, U, M> {
+        #[inline(always)]
+        fn as_mut(&mut self) -> &mut Fake<U, M> {
+            let ptr = (self as *mut Self).cast();
+            unsafe { &mut *ptr }
+        }
     }
 }
 
-impl<U, M> DerefMut for Fake<U, M>
-where
-    U: ?Sized,
-    M: Copy + TryInto<Metadata<U>>,
-{
-    #[inline(always)]
-    fn deref_mut(&mut self) -> &mut Real<U, M> {
-        let data_address = ptr::addr_of_mut!(self.0).cast();
-        let metadata = metadata(self);
-        let ptr = ptr::from_raw_parts_mut(data_address, metadata);
-        unsafe { &mut *ptr }
-    }
-}
-
-impl<T, U: ?Sized, M> AsRef<Fake<U, M>> for Real<T, M> {
-    #[inline(always)]
-    fn as_ref(&self) -> &Fake<U, M> {
-        unsafe { &*(self as *const Self).cast() }
-    }
-}
-
-impl<T, U: ?Sized, M> AsMut<Fake<U, M>> for Real<T, M> {
-    #[inline(always)]
-    fn as_mut(&mut self) -> &mut Fake<U, M> {
-        unsafe { &mut *(self as *mut Self).cast() }
-    }
-}
+pub(crate) use fake::Fake;

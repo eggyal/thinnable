@@ -36,7 +36,7 @@
 //!
 //! One can specify a non-standard metadata type, e.g. to use a smaller integer
 //! such as `u8` in place of the default `usize` when a slice fits within its
-//! bounds: a [`MetadataConversionFailure`] will arise if the metadata cannot be
+//! bounds: a [`MetadataCreationFailure`] will arise if the metadata cannot be
 //! converted into the proposed type.  Using such a non-standard metadata type
 //! may save some bytes of storage, but obviously adds additional conversion
 //! overhead on every dereference.
@@ -101,26 +101,23 @@
 //! [`ptr_metadata`]: https://doc.rust-lang.org/beta/unstable-book/library-features/ptr-metadata.html
 //! [`unsize`]: https://doc.rust-lang.org/beta/unstable-book/library-features/unsize.html
 
-#[allow(unsafe_code)]
 mod inner;
+mod metadata;
 mod thin_refs;
 
-use core::{convert::TryInto, marker::{PhantomData, Unsize}, ptr};
+use core::{convert::TryInto, marker::Unsize, ptr};
 use inner::{Fake, Real};
-pub use thin_refs::{ThinMut, ThinRef};
+use metadata::Metadata;
 
-type Metadata<U> = <U as ptr::Pointee>::Metadata;
+pub use metadata::MetadataCreationFailure;
+pub use thin_refs::{ThinMut, ThinRef};
 
 /// Convenient alias for slices.
 pub type ThinnableSlice<T, M, const N: usize> = Thinnable<[T; N], [T], M>;
 
-/// A failure on conversion of DST `U`'s metadata to type `M`.
-pub type MetadataConversionFailure<U, M> = <Metadata<U> as TryInto<M>>::Error;
-
 /// An owned value of type `T`, for which `U` is a DST to/from which it
 /// can be "unsized"/"sized" using metadata of type `M`.
-#[repr(C)]
-pub struct Thinnable<T, U: ?Sized, M = Metadata<U>>(Real<T, M>, PhantomData<U>);
+pub struct Thinnable<T, U: ?Sized, M = Metadata<U>>(Real<T, U, M>);
 
 impl<T, U> Thinnable<T, U>
 where
@@ -149,17 +146,16 @@ where
     U: ?Sized,
 {
     #[inline(always)]
-    pub fn try_new(data: T) -> Result<Self, MetadataConversionFailure<U, M>>
+    pub fn try_new(data: T) -> Result<Self, MetadataCreationFailure<U, M>>
     where
         T: Unsize<U>,
         Metadata<U>: TryInto<M>,
     {
-        let metadata = ptr::metadata(&data as &U).try_into()?;
-        Ok(Self(Real { metadata, data }, PhantomData))
+        Real::try_new(data).map(Self)
     }
 
     #[inline(always)]
-    pub fn try_cast<V>(self) -> Result<Thinnable<T, V, M>, MetadataConversionFailure<V, M>>
+    pub fn try_cast<V>(self) -> Result<Thinnable<T, V, M>, MetadataCreationFailure<V, M>>
     where
         T: Unsize<V>,
         V: ?Sized,
@@ -175,17 +171,17 @@ where
 {
     #[inline(always)]
     pub fn as_thin_ref(&self) -> ThinRef<U, M> {
-        ThinRef(self.0.as_ref())
+        ThinRef::new(self.0.as_ref())
     }
 
     #[inline(always)]
     pub fn as_thin_mut(&mut self) -> ThinMut<U, M> {
-        ThinMut(self.0.as_mut())
+        ThinMut::new(self.0.as_mut())
     }
 
     #[inline(always)]
     pub fn into_inner(self) -> T {
-        self.0.data
+        self.0.into_inner()
     }
 }
 
@@ -195,7 +191,7 @@ where
 {
     #[inline(always)]
     fn as_ref(&self) -> &T {
-        &self.0.data
+        &self.0
     }
 }
 
@@ -205,6 +201,6 @@ where
 {
     #[inline(always)]
     fn as_mut(&mut self) -> &mut T {
-        &mut self.0.data
+        &mut self.0
     }
 }
