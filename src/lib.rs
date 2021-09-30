@@ -105,11 +105,14 @@ mod inner;
 mod metadata;
 mod thin_refs;
 
-use core::{convert::TryInto, marker::Unsize, ptr};
+use core::{
+    convert::{Infallible, TryInto},
+    marker::Unsize,
+};
 use inner::{Fake, Real};
 use metadata::Metadata;
 
-pub use metadata::MetadataCreationFailure;
+pub use metadata::{MetadataConversionFailure, MetadataCreationFailure};
 pub use thin_refs::{ThinMut, ThinRef};
 
 /// Convenient alias for slices.
@@ -123,6 +126,33 @@ impl<T, U> Thinnable<T, U>
 where
     U: ?Sized,
 {
+    /// Create a new `Thinnable` for the given `data`, embedding the metadata
+    /// for `&U` without conversion.
+    ///
+    /// # Example
+    /// ```rust
+    /// use core::mem::size_of_val;
+    ///
+    /// // For convenience, we might define a type alias for Thinnables of our desired DST
+    /// type ThinnableDisplay<T, M> = thinnable::Thinnable<T, dyn core::fmt::Display, M>;
+    ///
+    /// // We can then create an array of thin references to such thinnables, even if the
+    /// // underlying type differs.
+    /// let int = ThinnableDisplay::new(123);
+    /// let float = ThinnableDisplay::new(4.56);
+    /// let string = ThinnableDisplay::new("xyz");
+    ///
+    /// let collection = [
+    ///     int.as_thin_ref(),
+    ///     float.as_thin_ref(),
+    ///     string.as_thin_ref(),
+    /// ];
+    ///
+    /// assert_eq!(size_of_val(&collection), 3 * size_of_val(&&()));
+    /// assert_eq!(collection[0].to_string(), "123");
+    /// assert_eq!(collection[1].to_string(), "4.56");
+    /// assert_eq!(collection[2].to_string(), "xyz");
+    /// ```
     #[inline(always)]
     pub fn new(data: T) -> Self
     where
@@ -135,7 +165,7 @@ where
     pub fn cast<V>(self) -> Thinnable<T, V>
     where
         T: Unsize<V>,
-        V: ?Sized + ptr::Pointee<Metadata = Metadata<U>>,
+        V: ?Sized,
     {
         self.try_cast().unwrap()
     }
@@ -146,6 +176,14 @@ where
     U: ?Sized,
 {
     #[inline(always)]
+    pub fn convert<N>(self) -> Thinnable<T, U, N>
+    where
+        M: TryInto<N, Error = Infallible>,
+    {
+        self.try_convert().unwrap()
+    }
+
+    #[inline(always)]
     pub fn try_new(data: T) -> Result<Self, MetadataCreationFailure<U, M>>
     where
         T: Unsize<U>,
@@ -155,13 +193,21 @@ where
     }
 
     #[inline(always)]
-    pub fn try_cast<V>(self) -> Result<Thinnable<T, V, M>, MetadataCreationFailure<V, M>>
+    pub fn try_cast<V, N>(self) -> Result<Thinnable<T, V, N>, MetadataCreationFailure<V, N>>
     where
         T: Unsize<V>,
         V: ?Sized,
-        Metadata<V>: TryInto<M>,
+        Metadata<V>: TryInto<N>,
     {
         Thinnable::try_new(self.into_inner())
+    }
+
+    #[inline(always)]
+    pub fn try_convert<N>(self) -> Result<Thinnable<T, U, N>, MetadataConversionFailure<M, N>>
+    where
+        M: TryInto<N>,
+    {
+        self.0.try_convert().map(Thinnable)
     }
 }
 

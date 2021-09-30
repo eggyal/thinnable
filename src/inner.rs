@@ -4,7 +4,7 @@ use core::{
     ops::{Deref, DerefMut},
 };
 
-use crate::metadata::{Metadata, MetadataCreationFailure, MetadataFor};
+use crate::metadata::{Metadata, MetadataConversionFailure, MetadataCreationFailure, MetadataFor};
 
 #[repr(C)]
 pub(crate) struct Real<T, U, M>
@@ -27,6 +27,17 @@ where
         Metadata<U>: TryInto<M>,
     {
         MetadataFor::try_new(&data).map(|metadata| Self { metadata, data })
+    }
+
+    #[inline(always)]
+    pub fn try_convert<N>(self) -> Result<Real<T, U, N>, MetadataConversionFailure<M, N>>
+    where
+        M: TryInto<N>,
+    {
+        let Self { metadata, data } = self;
+        metadata
+            .try_convert()
+            .map(|metadata| Real { metadata, data })
     }
 
     #[inline(always)]
