@@ -1,7 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(feature = "fn-refs", feature(fn_traits, unboxed_closures))]
 #![feature(ptr_metadata, unsize)]
-#![deny(unsafe_code)]
+#![deny(missing_docs, unsafe_code)]
 
 //! Standard Rust [DST] references comprise not only a pointer to the underlying
 //! object, but also some associated metadata by which the DST can be resolved
@@ -105,18 +105,23 @@ mod inner;
 mod metadata;
 mod thin_refs;
 
-use core::{
-    convert::{Infallible, TryInto},
-    marker::Unsize,
-};
+use core::{convert::TryInto, marker::Unsize};
 use inner::{Fake, Real};
 use metadata::Metadata;
 
-pub use metadata::{MetadataConversionFailure, MetadataCreationFailure};
+pub use metadata::MetadataCreationFailure;
 pub use thin_refs::{ThinMut, ThinRef};
 
 /// Convenient alias for slices.
 pub type ThinnableSlice<T, M, const N: usize> = Thinnable<[T; N], [T], M>;
+
+/// Create convenient aliases for trait objects.
+#[macro_export]
+macro_rules! thinnable_trait {
+    ($vis:vis $alias:ident for dyn $trait:path) => {
+        $vis type $alias<T, M> = $crate::Thinnable<T, dyn $trait, M>;
+    };
+}
 
 /// An owned value of type `T`, for which `U` is a DST to/from which it
 /// can be "unsized"/"sized" using metadata of type `M`.
@@ -127,14 +132,17 @@ where
     U: ?Sized,
 {
     /// Create a new `Thinnable` for the given `data`, embedding the metadata
-    /// for `&U` without conversion.
+    /// for `U` without conversion.
+    ///
+    /// For a similar function that also converts the metadata to some desired
+    /// type, see [`try_new`][Self::try_new].
     ///
     /// # Example
     /// ```rust
     /// use core::mem::size_of_val;
     ///
     /// // For convenience, we might define a type alias for Thinnables of our desired DST
-    /// type ThinnableDisplay<T, M> = thinnable::Thinnable<T, dyn core::fmt::Display, M>;
+    /// thinnable::thinnable_trait!(ThinnableDisplay for dyn core::fmt::Display);
     ///
     /// // We can then create an array of thin references to such thinnables, even if the
     /// // underlying type differs.
@@ -161,6 +169,48 @@ where
         Self::try_new(data).unwrap()
     }
 
+    /// Cast this `Thinnable` into one embedding metadata for `V` without
+    /// conversion.  This is particularly useful if one wants thin
+    /// references to a different trait object for the existing underlying data.
+    ///
+    /// For a similar method that also converts the metadata to some desired
+    /// type, see [`try_cast`][Self::try_cast].
+    ///
+    /// # Example
+    /// ```rust
+    /// use core::{fmt, mem::size_of_val};
+    /// use thinnable::thinnable_trait;
+    ///
+    /// thinnable_trait!(ThinnableLowerExp for dyn fmt::LowerExp);
+    /// let int = ThinnableLowerExp::new(123);
+    /// let float = ThinnableLowerExp::new(4.56);
+    ///
+    /// let hexes = [
+    ///     int.as_thin_ref(),
+    ///     float.as_thin_ref(),
+    /// ];
+    ///
+    /// assert_eq!(size_of_val(&hexes), 2 * size_of_val(&&()));
+    /// assert_eq!(format!("{:e}", hexes[0]), "1.23e2");
+    /// assert_eq!(format!("{:e}", hexes[1]), "4.56e0");
+    ///
+    /// // cast these existing ThinnableLowerExps to ThinnableDisplays
+    /// thinnable_trait!(ThinnableDisplay for dyn fmt::Display);
+    /// let int = int.cast();
+    /// let float = float.cast();
+    /// let string = ThinnableDisplay::new("xyz");
+    ///
+    /// let displays = [
+    ///     int.as_thin_ref(),
+    ///     float.as_thin_ref(),
+    ///     string.as_thin_ref(),
+    /// ];
+    ///
+    /// assert_eq!(size_of_val(&displays), 3 * size_of_val(&&()));
+    /// assert_eq!(displays[0].to_string(), "123");
+    /// assert_eq!(displays[1].to_string(), "4.56");
+    /// assert_eq!(displays[2].to_string(), "xyz");
+    /// ```
     #[inline(always)]
     pub fn cast<V>(self) -> Thinnable<T, V>
     where
@@ -173,25 +223,87 @@ where
 
 impl<T, U, M> Thinnable<T, U, M>
 where
+    T: Unsize<U>,
     U: ?Sized,
 {
+    /// Rebuild this `Thinnable`, embedding metadata for the existing DST `U`
+    /// without conversion.  This is particularly useful to restore a
+    /// `Thinnable` to its default metadata encoding after previous conversions.
+    ///
+    /// For a similar method that also converts the metadata to some desired
+    /// type, see [`try_convert`][Self::try_convert].
+    ///
+    /// # Example
+    /// ```rust
+    /// use core::mem::size_of_val;
+    ///
+    /// type ThinnableSliceU8<T, const N: usize> = thinnable::ThinnableSlice<T, u8, N>;
+    ///
+    /// let slice = ThinnableSliceU8::try_new([1, 2, 3]).unwrap();
+    ///
+    /// let size_u8 = size_of_val(&slice);
+    /// let slice = slice.normalize();
+    /// let size_default = size_of_val(&slice);
+    ///
+    /// assert!(size_default > size_u8);
+    /// ```
     #[inline(always)]
-    pub fn convert<N>(self) -> Thinnable<T, U, N>
-    where
-        M: TryInto<N, Error = Infallible>,
-    {
+    pub fn normalize(self) -> Thinnable<T, U> {
         self.try_convert().unwrap()
     }
 
+    /// Attempt to create a new `Thinnable` for the given `data`, embedding the
+    /// metadata for `U` converted to `M`.
+    ///
+    /// For a similar, infallible, function that does not convert the metadata,
+    /// see [`new`][Self::new].
     #[inline(always)]
     pub fn try_new(data: T) -> Result<Self, MetadataCreationFailure<U, M>>
     where
-        T: Unsize<U>,
         Metadata<U>: TryInto<M>,
     {
         Real::try_new(data).map(Self)
     }
 
+    /// Attempt to rebuild this `Thinnable`, converting metadata for the
+    /// existing DST `U` into `N`.  This is particularly useful if one wants
+    /// the metadata embedded in this `Thinnable` to use a more/less compressed
+    /// representation.
+    ///
+    /// For a similar, infallible, method that embeds `U`'s unconverted
+    /// metadata, see [`normalize`][Self::normalize].
+    ///
+    /// # Example
+    /// ```rust
+    /// use core::mem::size_of_val;
+    ///
+    /// let slice = thinnable::ThinnableSlice::new([1, 2, 3]);
+    ///
+    /// let size_default = size_of_val(&slice);
+    /// let slice = slice.try_convert::<u8>();
+    /// let size_u8 = size_of_val(&slice);
+    ///
+    /// assert!(size_u8 < size_default);
+    /// ```
+    #[inline(always)]
+    pub fn try_convert<N>(self) -> Result<Thinnable<T, U, N>, MetadataCreationFailure<U, N>>
+    where
+        Metadata<U>: TryInto<N>,
+    {
+        self.try_cast()
+    }
+}
+
+impl<T, U, M> Thinnable<T, U, M>
+where
+    U: ?Sized,
+{
+    /// Attempt to cast this `Thinnable` into one embedding metadata for `V`
+    /// converted to `N`.  This is particularly useful if one wants thin
+    /// references to a different trait object for the existing underlying data.
+    ///
+    /// For a similar, infallible, method that does not convert the metadata,
+    /// see [`cast`][Self::cast].
     #[inline(always)]
     pub fn try_cast<V, N>(self) -> Result<Thinnable<T, V, N>, MetadataCreationFailure<V, N>>
     where
@@ -202,29 +314,29 @@ where
         Thinnable::try_new(self.into_inner())
     }
 
-    #[inline(always)]
-    pub fn try_convert<N>(self) -> Result<Thinnable<T, U, N>, MetadataConversionFailure<M, N>>
-    where
-        M: TryInto<N>,
-    {
-        self.0.try_convert().map(Thinnable)
-    }
-}
-
-impl<T, U, M> Thinnable<T, U, M>
-where
-    U: ?Sized,
-{
+    /// Obtain a [`ThinRef`] to this `Thinnable`'s DST, analogous to `&U`, but
+    /// only a single pointer-width in size.
+    ///
+    /// `ThinRef` provides shared access, and therefore does not permit direct
+    /// mutation of the underlying data.  For exclusive access, see
+    /// [`as_thin_mut`][Self::as_thin_mut].
     #[inline(always)]
     pub fn as_thin_ref(&self) -> ThinRef<U, M> {
         ThinRef::new(self.0.as_ref())
     }
 
+    /// Obtain a [`ThinMut`] to this `Thinnable`'s DST, analogous to `&mut U`,
+    /// but only a single pointer-width in size.
+    ///
+    /// `ThinMut` provides exclusive access, and therefore permits direct
+    /// mutation of the underlying data.  For shared access, see
+    /// [`as_thin_ref`][Self::as_thin_ref].
     #[inline(always)]
     pub fn as_thin_mut(&mut self) -> ThinMut<U, M> {
         ThinMut::new(self.0.as_mut())
     }
 
+    /// Extract the embedded data from this `Thinnable`.
     #[inline(always)]
     pub fn into_inner(self) -> T {
         self.0.into_inner()

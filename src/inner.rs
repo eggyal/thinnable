@@ -4,7 +4,7 @@ use core::{
     ops::{Deref, DerefMut},
 };
 
-use crate::metadata::{Metadata, MetadataConversionFailure, MetadataCreationFailure, MetadataFor};
+use crate::metadata::{Metadata, MetadataCreationFailure, MetadataFor};
 
 #[repr(C)]
 pub(crate) struct Real<T, U, M>
@@ -29,15 +29,17 @@ where
         MetadataFor::try_new(&data).map(|metadata| Self { metadata, data })
     }
 
+    /// Obtain the metadata for the DST wrapper.
+    ///
+    /// ### Panics
+    /// This method will panic if `metadata` contains a value that cannot be
+    /// converted to a `Metadata<U>`.
     #[inline(always)]
-    pub fn try_convert<N>(self) -> Result<Real<T, U, N>, MetadataConversionFailure<M, N>>
+    pub fn metadata(&self) -> Metadata<U>
     where
-        M: TryInto<N>,
+        M: Copy + TryInto<Metadata<U>>,
     {
-        let Self { metadata, data } = self;
-        metadata
-            .try_convert()
-            .map(|metadata| Real { metadata, data })
+        self.metadata.try_get().ok().unwrap()
     }
 
     #[inline(always)]
@@ -80,20 +82,15 @@ mod fake {
     /// Obtain the metadata for the DST wrapper.
     ///
     /// ### Panics
-    /// This method will panic if `fake.0.metadata` contains a value
-    /// that cannot be converted to a `Metadata<U>`.
+    /// This method will panic if `fake.0` contains metadata that cannot be
+    /// converted to a `Metadata<U>`.
     #[inline(always)]
     fn metadata<U, M>(fake: &Fake<U, M>) -> Metadata<Real<U, U, M>>
     where
         U: ?Sized,
         M: Copy + TryInto<Metadata<U>>,
     {
-        let metadata = fake
-            .0
-            .metadata
-            .try_get()
-            .ok()
-            .expect("recoverable metadata value");
+        let metadata = fake.0.metadata();
 
         // The metadata of `Real<U, _, _>` is that of its last field, `data`,
         // which has type `U`.

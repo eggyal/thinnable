@@ -8,7 +8,6 @@ pub type Metadata<U> = <U as ptr::Pointee>::Metadata;
 
 /// A failure on conversion of DST `U`'s metadata to type `M`.
 pub type MetadataCreationFailure<U, M> = <Metadata<U> as TryInto<M>>::Error;
-pub type MetadataConversionFailure<M, N> = <M as TryInto<N>>::Error;
 pub type MetadataRecoveryFailure<U, M> = <M as TryInto<Metadata<U>>>::Error;
 
 pub(crate) struct MetadataFor<U: ?Sized, M> {
@@ -37,16 +36,5 @@ where
         M: Copy + TryInto<Metadata<U>>,
     {
         self.metadata.try_into()
-    }
-
-    #[inline(always)]
-    pub fn try_convert<N>(self) -> Result<MetadataFor<U, N>, MetadataConversionFailure<M, N>>
-    where
-        M: TryInto<N>,
-    {
-        let Self { for_type, metadata } = self;
-        metadata
-            .try_into()
-            .map(|metadata| MetadataFor { for_type, metadata })
     }
 }
