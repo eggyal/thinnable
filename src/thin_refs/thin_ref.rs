@@ -9,7 +9,8 @@ use core::{
 
 use crate::{Fake, Metadata};
 
-/// A "thin" shared DST reference, analogue of `&U`.
+/// A "thin" shared DST reference, analogue of `&U` (but only one pointer-width
+/// in size).
 pub struct ThinRef<'a, U: ?Sized, M = Metadata<U>>(&'a Fake<U, M>);
 
 impl<'a, U, M> ThinRef<'a, U, M>

@@ -9,7 +9,8 @@ use core::{
 
 use crate::{Fake, Metadata};
 
-/// A "thin" exclusive DST reference, analogue of `&mut U`.
+/// A "thin" exclusive DST reference, analogue of `&mut U` (but only one
+/// pointer-width in size).
 pub struct ThinMut<'a, U: ?Sized, M = Metadata<U>>(&'a mut Fake<U, M>);
 
 impl<'a, U, M> ThinMut<'a, U, M>

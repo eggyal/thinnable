@@ -1,7 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(feature = "fn-refs", feature(fn_traits, unboxed_closures))]
 #![feature(ptr_metadata, unsize)]
-#![deny(missing_docs, unsafe_code)]
+#![deny(missing_docs)]
 
 //! Standard Rust [DST] references comprise not only a pointer to the underlying
 //! object, but also some associated metadata by which the DST can be resolved
@@ -42,50 +42,46 @@
 //! overhead on every dereference.
 //!
 //! The [`ThinnableSlice<T>`] type alias is provided for more convenient use
-//! with `[T]` slices.
+//! with `[T]` slices; and the [`ThinnableSliceU8<T>`], [`ThinnableSliceU16<T>`]
+//! and [`ThinnableSliceU32<T>`] aliases provide the same convenient use with
+//! `[T]` slices but encoding the length metadata in a `u8`, `u16` or `u32`
+//! respectively.
 //!
 //! This crate presently depends on Rust's unstable [`ptr_metadata`] and
 //! [`unsize`] features and, accordingly, requires a nightly toolchain.
 //!
 //! # Example
 //! ```rust
-//! use std::{alloc::Layout, convert::TryFrom, fmt, mem::size_of_val};
+//! use core::{alloc::Layout, convert::TryFrom, fmt, mem};
 //! use thinnable::*;
 //!
-//! const ARRAY: [u16; 3] = [1, 2, 3];
-//!
-//! const LAYOUT_ARRAY: Layout = Layout::new::<[u16; 3]>();
-//! const LAYOUT_USIZE: Layout = Layout::new::<usize>();
-//! const LAYOUT_U8   : Layout = Layout::new::<u8>();
+//! const THIN_SIZE: usize = mem::size_of::<&()>();
 //!
 //! // Creating a thinnable slice for an array is straightforward.
-//! let thinnable_slice = ThinnableSlice::new(ARRAY);
-//!
-//! // A thinnable comprises its metadata (for a slice, it's the number of
-//! // elements), followed by its content.
-//! let (layout, _) = LAYOUT_USIZE.extend(LAYOUT_ARRAY).unwrap();
-//! assert_eq!(size_of_val(&thinnable_slice), layout.pad_to_align().size());
+//! let thinnable_slice = ThinnableSlice::new([1, 2, 3]);
 //!
 //! // Given a thinnable, we can obtain a shared reference...
 //! let r = thinnable_slice.as_thin_ref(); // ThinRef<[u16]>
 //! // ...which is "thin"....
-//! assert_eq!(size_of_val(&r), size_of_val(&&()));
+//! assert_eq!(mem::size_of_val(&r), THIN_SIZE);
 //! // ...but which otherwise behaves just like a regular "fat" DST reference
-//! // (dereferencing requires that `M: TryInto<R>` where `R` is the true
-//! // metadata type).
 //! assert_eq!(&r[..2], &[1, 2]);
 //!
 //! // For types `M` where the metadata type implements `TryInto<M>`, we can use
 //! // `Thinnable::try_new` to try creating a thinnable using `M` as its stored
-//! // metadata type:
-//! let mut thinnable_slice = Thinnable::<_, [_], u8>::try_new(ARRAY).unwrap();
-//! let (layout, _) = LAYOUT_U8.extend(LAYOUT_ARRAY).unwrap();
-//! assert_eq!(size_of_val(&thinnable_slice), layout.pad_to_align().size());
+//! // metadata type (dereferencing requires that `M: TryInto<R>` where `R` is
+//! // the original metadata type).
+//! //
+//! // For slices, there's a slightly more ergonomic interface:
+//! let size_default = mem::size_of_val(&thinnable_slice);
+//! let mut thinnable_slice = ThinnableSliceU8::try_slice([1, 2, 3]).unwrap();
+//! let size_u8 = mem::size_of_val(&thinnable_slice);
+//! assert!(size_u8 < size_default);
 //!
 //! // We can also obtain a mutable reference...
 //! let mut m = thinnable_slice.as_thin_mut(); // ThinMut<[u16], u8>
 //! // ...which is also "thin"....
-//! assert_eq!(size_of_val(&m), size_of_val(&&()));
+//! assert_eq!(mem::size_of_val(&m), THIN_SIZE);
 //! // ...but which otherwise behaves just like a regular "fat" DST reference.
 //! m[1] = 5;
 //! assert_eq!(&m[1..], &[5, 3]);
@@ -93,7 +89,7 @@
 //! // We can also have thinnable trait objects:
 //! let thinnable_trait_object = Thinnable::<_, dyn fmt::Display>::new(123);
 //! let o = thinnable_trait_object.as_thin_ref(); // ThinRef<dyn Display>
-//! assert_eq!(size_of_val(&o), size_of_val(&&()));
+//! assert_eq!(mem::size_of_val(&o), THIN_SIZE);
 //! assert_eq!(o.to_string(), "123");
 //! ```
 //!
@@ -103,6 +99,7 @@
 
 mod inner;
 mod metadata;
+mod slice;
 mod thin_refs;
 
 use core::{convert::TryInto, marker::Unsize};
@@ -110,10 +107,10 @@ use inner::{Fake, Real};
 use metadata::Metadata;
 
 pub use metadata::MetadataCreationFailure;
+pub use slice::{
+    SliceLength, ThinnableSlice, ThinnableSliceU16, ThinnableSliceU32, ThinnableSliceU8,
+};
 pub use thin_refs::{ThinMut, ThinRef};
-
-/// Convenient alias for slices.
-pub type ThinnableSlice<T, M, const N: usize> = Thinnable<[T; N], [T], M>;
 
 /// Create convenient aliases for trait objects.
 #[macro_export]
@@ -166,7 +163,7 @@ where
     where
         T: Unsize<U>,
     {
-        Self::try_new(data).unwrap()
+        unsafe { Self::try_new(data) }.unwrap()
     }
 
     /// Cast this `Thinnable` into one embedding metadata for `V` without
@@ -217,7 +214,7 @@ where
         T: Unsize<V>,
         V: ?Sized,
     {
-        self.try_cast().unwrap()
+        unsafe { self.try_cast() }.unwrap()
     }
 }
 
@@ -236,10 +233,9 @@ where
     /// # Example
     /// ```rust
     /// use core::mem::size_of_val;
+    /// use thinnable::ThinnableSliceU8;
     ///
-    /// type ThinnableSliceU8<T, const N: usize> = thinnable::ThinnableSlice<T, u8, N>;
-    ///
-    /// let slice = ThinnableSliceU8::try_new([1, 2, 3]).unwrap();
+    /// let slice = ThinnableSliceU8::try_slice([1, 2, 3]).unwrap();
     ///
     /// let size_u8 = size_of_val(&slice);
     /// let slice = slice.normalize();
@@ -249,16 +245,26 @@ where
     /// ```
     #[inline(always)]
     pub fn normalize(self) -> Thinnable<T, U> {
-        self.try_convert().unwrap()
+        unsafe { self.try_convert() }.unwrap()
     }
 
     /// Attempt to create a new `Thinnable` for the given `data`, embedding the
     /// metadata for `U` converted to `M`.
     ///
-    /// For a similar, infallible, function that does not convert the metadata,
-    /// see [`new`][Self::new].
+    /// For a similar, infallible, safe function that does not convert the
+    /// metadata, see [`new`][Self::new].
+    ///
+    /// # Safety
+    /// If `<<U as Pointee>::Metadata as TryInto<M>>::try_into(in)` returns
+    /// `Ok(m)` and `<M as TryInto<<U as Pointee>::Metadata>>::try_into(m)`
+    /// returns `Ok(out)`, then dereferencing a [`ThinRef`] or [`ThinMut`]
+    /// of the returned `Thinnable` is undefined behavior unless `in` and
+    /// `out` are bitwise identical.
+    ///
+    /// That is to say, callers are responsible for ensuring that metadata
+    /// conversion to `M` either fails, or produces reversible results.
     #[inline(always)]
-    pub fn try_new(data: T) -> Result<Self, MetadataCreationFailure<U, M>>
+    pub unsafe fn try_new(data: T) -> Result<Self, MetadataCreationFailure<U, M>>
     where
         Metadata<U>: TryInto<M>,
     {
@@ -270,8 +276,18 @@ where
     /// the metadata embedded in this `Thinnable` to use a more/less compressed
     /// representation.
     ///
-    /// For a similar, infallible, method that embeds `U`'s unconverted
+    /// For a similar, infallible, safe method that embeds `U`'s unconverted
     /// metadata, see [`normalize`][Self::normalize].
+    ///
+    /// # Safety
+    /// If `<<U as Pointee>::Metadata as TryInto<N>>::try_into(in)` returns
+    /// `Ok(n)` and `<N as TryInto<<U as Pointee>::Metadata>>::try_into(n)`
+    /// returns `Ok(out)`, then dereferencing a [`ThinRef`] or [`ThinMut`]
+    /// of the returned `Thinnable` is undefined behavior unless `in` and
+    /// `out` are bitwise identical.
+    ///
+    /// That is to say, callers are responsible for ensuring that metadata
+    /// conversion to `N` either fails, or produces reversible results.
     ///
     /// # Example
     /// ```rust
@@ -280,13 +296,13 @@ where
     /// let slice = thinnable::ThinnableSlice::new([1, 2, 3]);
     ///
     /// let size_default = size_of_val(&slice);
-    /// let slice = slice.try_convert::<u8>();
+    /// let slice = unsafe { slice.try_convert::<u8>() };
     /// let size_u8 = size_of_val(&slice);
     ///
     /// assert!(size_u8 < size_default);
     /// ```
     #[inline(always)]
-    pub fn try_convert<N>(self) -> Result<Thinnable<T, U, N>, MetadataCreationFailure<U, N>>
+    pub unsafe fn try_convert<N>(self) -> Result<Thinnable<T, U, N>, MetadataCreationFailure<U, N>>
     where
         Metadata<U>: TryInto<N>,
     {
@@ -302,10 +318,20 @@ where
     /// converted to `N`.  This is particularly useful if one wants thin
     /// references to a different trait object for the existing underlying data.
     ///
-    /// For a similar, infallible, method that does not convert the metadata,
-    /// see [`cast`][Self::cast].
+    /// For a similar, infallible, safe method that does not convert the
+    /// metadata, see [`cast`][Self::cast].
+    ///
+    /// # Safety
+    /// If `<<V as Pointee>::Metadata as TryInto<N>>::try_into(in)` returns
+    /// `Ok(n)` and `<N as TryInto<<V as Pointee>::Metadata>>::try_into(n)`
+    /// returns `Ok(out)`, then dereferencing a [`ThinRef`] or [`ThinMut`]
+    /// of the returned `Thinnable` is undefined behavior unless `in` and
+    /// `out` are bitwise identical.
+    ///
+    /// That is to say, callers are responsible for ensuring that metadata
+    /// conversion to `N` either fails, or produces reversible results.
     #[inline(always)]
-    pub fn try_cast<V, N>(self) -> Result<Thinnable<T, V, N>, MetadataCreationFailure<V, N>>
+    pub unsafe fn try_cast<V, N>(self) -> Result<Thinnable<T, V, N>, MetadataCreationFailure<V, N>>
     where
         T: Unsize<V>,
         V: ?Sized,
