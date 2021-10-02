@@ -33,7 +33,8 @@ where
 
 impl<U, M> Copy for ThinRef<'_, U, M> where U: ?Sized {}
 
-#[cfg(feature = "fn-refs")]
+#[cfg(any(feature = "fn-refs", doc))]
+#[doc(cfg(feature = "fn-refs"))]
 impl<Args, U, M> FnMut<Args> for ThinRef<'_, U, M>
 where
     U: ?Sized + Fn<Args>,
@@ -45,7 +46,8 @@ where
     }
 }
 
-#[cfg(feature = "fn-refs")]
+#[cfg(any(feature = "fn-refs", doc))]
+#[doc(cfg(feature = "fn-refs"))]
 impl<Args, U, M> FnOnce<Args> for ThinRef<'_, U, M>
 where
     U: ?Sized + Fn<Args>,
@@ -60,12 +62,14 @@ where
 
 delegate! {
     for ThinRef {
-        #[cfg(feature = "fn-refs")]
+        #[cfg(any(feature = "fn-refs", doc))]
+        #[doc(cfg(feature = "fn-refs"))]
         Fn<Args> {
             extern "rust-call" fn call(&self, args: Args) -> U::Output;
         }
 
-        #[cfg(feature = "std")]
+        #[cfg(any(feature = "std", doc))]
+        #[doc(cfg(feature = "std"))]
         std::net::ToSocketAddrs {
             type Iter;
             fn to_socket_addrs(&self) -> std::io::Result<U::Iter>;

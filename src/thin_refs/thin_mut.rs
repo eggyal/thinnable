@@ -46,7 +46,8 @@ where
 
 delegate! {
     for ThinMut {
-        #[cfg(feature = "fn-refs")]
+        #[cfg(any(feature = "fn-refs", doc))]
+        #[doc(cfg(feature = "fn-refs"))]
         FnMut<Args> {
             extern "rust-call" fn call_mut(&mut self, args: Args) -> U::Output;
         }
@@ -70,7 +71,8 @@ delegate! {
         ExactSizeIterator {}
         core::iter::FusedIterator {}
 
-        #[cfg(feature = "std")]
+        #[cfg(any(feature = "std", doc))]
+        #[doc(cfg(feature = "std"))]
         std::io::Write {
             fn write(&mut self, buf: &[u8]) -> std::io::Result<usize>;
             fn write_vectored(&mut self, bufs: &[std::io::IoSlice<'_>]) -> std::io::Result<usize>;
@@ -79,7 +81,8 @@ delegate! {
             fn write_fmt(&mut self, fmt: fmt::Arguments<'_>) -> std::io::Result<()>;
         }
 
-        #[cfg(feature = "std")]
+        #[cfg(any(feature = "std", doc))]
+        #[doc(cfg(feature = "std"))]
         std::io::Read {
             fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize>;
             fn read_vectored(&mut self, bufs: &mut [std::io::IoSliceMut<'_>]) -> std::io::Result<usize>;
@@ -88,14 +91,16 @@ delegate! {
             fn read_exact(&mut self, buf: &mut [u8]) -> std::io::Result<()>;
         }
 
-        #[cfg(feature = "std")]
+        #[cfg(any(feature = "std", doc))]
+        #[doc(cfg(feature = "std"))]
         std::io::Seek {
             fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64>;
             fn rewind(&mut self) -> std::io::Result<()>;
             fn stream_position(&mut self) -> std::io::Result<u64>;
         }
 
-        #[cfg(feature = "std")]
+        #[cfg(any(feature = "std", doc))]
+        #[doc(cfg(feature = "std"))]
         std::io::BufRead {
             fn fill_buf(&mut self) -> std::io::Result<&[u8]>;
             fn consume(&mut self, amt: usize);
@@ -117,7 +122,8 @@ where
     }
 }
 
-#[cfg(feature = "fn-refs")]
+#[cfg(any(feature = "fn-refs", doc))]
+#[doc(cfg(feature = "fn-refs"))]
 impl<Args, U, M> FnOnce<Args> for ThinMut<'_, U, M>
 where
     U: ?Sized + FnMut<Args>,
