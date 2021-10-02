@@ -94,8 +94,8 @@
 //! ```
 //!
 //! [DST]: https://doc.rust-lang.org/book/ch19-04-advanced-types.html#dynamically-sized-types-and-the-sized-trait
-//! [`ptr_metadata`]: https://doc.rust-lang.org/beta/unstable-book/library-features/ptr-metadata.html
-//! [`unsize`]: https://doc.rust-lang.org/beta/unstable-book/library-features/unsize.html
+//! [`ptr_metadata`]: https://doc.rust-lang.org/nightly/unstable-book/library-features/ptr-metadata.html
+//! [`unsize`]: https://doc.rust-lang.org/nightly/unstable-book/library-features/unsize.html
 
 mod inner;
 mod metadata;
