@@ -64,17 +64,19 @@
 //! let r = thinnable_slice.as_thin_ref(); // ThinRef<[u16]>
 //! // ...which is "thin"....
 //! assert_eq!(mem::size_of_val(&r), THIN_SIZE);
-//! // ...but which otherwise behaves just like a regular "fat" DST reference
+//! // ...but which otherwise behaves just like a regular "fat" DST
+//! // reference
 //! assert_eq!(&r[..2], &[1, 2]);
 //!
-//! // For types `M` where the metadata type implements `TryInto<M>`, we can use
-//! // `Thinnable::try_new` to try creating a thinnable using `M` as its stored
-//! // metadata type (dereferencing requires that `M: TryInto<R>` where `R` is
-//! // the original metadata type).
+//! // For types `M` where the metadata type implements `TryInto<M>`, we
+//! // can use `Thinnable::try_new` to try creating a thinnable using
+//! // `M` as its stored metadata type (dereferencing requires that
+//! // `M: TryInto<R>` where `R` is the original metadata type).
 //! //
 //! // For slices, there's a slightly more ergonomic interface:
 //! let size_default = mem::size_of_val(&thinnable_slice);
-//! let mut thinnable_slice = ThinnableSliceU8::try_slice([1, 2, 3]).unwrap();
+//! let mut thinnable_slice;
+//! thinnable_slice = ThinnableSliceU8::try_slice([1, 2, 3]).unwrap();
 //! let size_u8 = mem::size_of_val(&thinnable_slice);
 //! assert!(size_u8 < size_default);
 //!
@@ -82,13 +84,15 @@
 //! let mut m = thinnable_slice.as_thin_mut(); // ThinMut<[u16], u8>
 //! // ...which is also "thin"....
 //! assert_eq!(mem::size_of_val(&m), THIN_SIZE);
-//! // ...but which otherwise behaves just like a regular "fat" DST reference.
+//! // ...but which otherwise behaves just like a regular "fat" DST
+//! // reference.
 //! m[1] = 5;
 //! assert_eq!(&m[1..], &[5, 3]);
 //!
 //! // We can also have thinnable trait objects:
-//! let thinnable_trait_object = Thinnable::<_, dyn fmt::Display>::new(123);
-//! let o = thinnable_trait_object.as_thin_ref(); // ThinRef<dyn Display>
+//! let thinnable_trait_object;
+//! thinnable_trait_object = Thinnable::<_, dyn fmt::Display>::new(123);
+//! let o = thinnable_trait_object.as_thin_ref();// ThinRef<dyn Display>
 //! assert_eq!(mem::size_of_val(&o), THIN_SIZE);
 //! assert_eq!(o.to_string(), "123");
 //! ```
