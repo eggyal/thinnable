@@ -1,6 +1,6 @@
-#![cfg_attr(not(feature = "std"), no_std)]
-#![cfg_attr(feature = "fn-refs", feature(fn_traits, unboxed_closures))]
-#![feature(ptr_metadata, unsize)]
+#![cfg_attr(not(any(feature = "std", doc)), no_std)]
+#![cfg_attr(any(feature = "fn-refs", doc), feature(fn_traits, unboxed_closures))]
+#![feature(doc_cfg, ptr_metadata, unsize)]
 #![deny(missing_docs)]
 
 //! Standard Rust [DST] references comprise not only a pointer to the underlying
